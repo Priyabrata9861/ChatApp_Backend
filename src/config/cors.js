@@ -18,7 +18,16 @@ const isAllowedOrigin = (origin) => {
 
   try {
     const { hostname } = new URL(origin);
-    return hostname === "vercel.app" || hostname.endsWith(".vercel.app");
+    return (
+      hostname === "vercel.app" ||
+      hostname.endsWith(".vercel.app") ||
+      hostname === "render.com" ||
+      hostname.endsWith(".render.com") ||
+      hostname === "netlify.app" ||
+      hostname.endsWith(".netlify.app") ||
+      hostname === "railway.app" ||
+      hostname.endsWith(".railway.app")
+    );
   } catch {
     return false;
   }
