@@ -5,6 +5,7 @@ import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import { fileURLToPath } from "node:url";
 import { ensureDatabaseConnected } from "./config/database.js";
+import { corsOptions } from "./config/cors.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
@@ -14,17 +15,7 @@ import groupRoutes from "./routes/group.routes.js";
 const app = express();
 const uploadsDirectory = fileURLToPath(new URL("../uploads", import.meta.url));
 
-const allowedOrigins = (process.env.CORS_ORIGINS || "http://localhost:5173")
-  .split(",")
-  .map((origin) => origin.trim())
-  .filter(Boolean);
-
-app.use(
-  cors({
-    origin: allowedOrigins,
-    credentials: true,
-  }),
-);
+app.use(cors(corsOptions));
 
 app.use(helmet());
 

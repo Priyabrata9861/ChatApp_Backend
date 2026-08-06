@@ -6,6 +6,7 @@ import User from "../models/User.js";
 import GroupMember from "../models/GroupMember.js";
 import GroupMessage from "../models/GroupMessage.js";
 import { areBlocked, areFriends } from "../services/social.service.js";
+import { socketCorsOptions } from "./cors.js";
 
 const roomFor = (userId) => `user:${userId}`;
 const groupRoom = (groupId) => `group:${groupId}`;
@@ -17,11 +18,7 @@ const connectionBetween = (firstUserId, secondUserId) => ({
 });
 
 export const initializeSocket = (server) => {
-  const origins = (process.env.CORS_ORIGINS || "http://localhost:5173")
-    .split(",")
-    .map((origin) => origin.trim())
-    .filter(Boolean);
-  const io = new Server(server, { cors: { origin: origins, credentials: true } });
+  const io = new Server(server, { cors: socketCorsOptions });
 
   io.use((socket, next) => {
     try {
