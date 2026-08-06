@@ -4,6 +4,7 @@ import helmet from "helmet";
 import morgan from "morgan";
 import cookieParser from "cookie-parser";
 import { fileURLToPath } from "node:url";
+import { ensureDatabaseConnected } from "./config/database.js";
 
 import authRoutes from "./routes/auth.routes.js";
 import chatRoutes from "./routes/chat.routes.js";
@@ -55,6 +56,8 @@ app.use(
 );
 
 // API Routes
+
+app.use("/api", ensureDatabaseConnected);
 
 app.use("/api/auth", authRoutes);
 app.use("/api/chat", chatRoutes);
