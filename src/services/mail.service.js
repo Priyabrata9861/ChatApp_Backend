@@ -5,7 +5,7 @@ const trimEnv = (value) => value?.trim();
 const getEmailAuth = () => {
   const email = trimEnv(process.env.EMAIL);
   const rawPassword = process.env.APP_PASSWORD || "";
-  const pass = rawPassword.replace(/\s+/g, "");
+  const pass = rawPassword.replace(/\s+/g, "").trim();
 
   return { user: email, pass };
 };
