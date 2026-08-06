@@ -1,47 +1,30 @@
 import User from "../models/User.js";
 import OTP from "../models/Otp.js";
-import { Op } from "sequelize";
 
-export const findUserByEmail = (email) => {
-  return User.findOne({
-    where: {
-      email,
-    },
-  });
-};
+export const findUserByEmail = (email) => User.findOne({ email });
 
-export const findUserById = (userId) => User.findByPk(userId);
+export const findUserById = (userId) => User.findOne({ id: Number(userId) });
 
 export const findOtherUsers = (userId) =>
-  User.findAll({
-    where: { id: { [Op.ne]: userId } },
-    attributes: ["id", "email", "name", "avatar", "about", "isOnline", "lastSeen"],
-    order: [["name", "ASC"]],
-  });
+  User.find({ id: { $ne: Number(userId) } })
+    .select("id email name avatar about isOnline lastSeen createdAt updatedAt")
+    .sort({ name: 1 });
 
 export const createUser = (data) => User.create(data);
 
-export const updateUserProfile = (userId, data) => {
-  return User.update(data, {
-    where: {
-      id: userId,
-    },
-  });
+export const updateUserProfile = async (userId, data) => {
+  const result = await User.updateOne({ id: Number(userId) }, data);
+  return [result.matchedCount];
 };
 
 export const saveOTP = async (data) => {
-  await OTP.destroy({ where: { email: data.email, verified: false } });
+  await OTP.deleteMany({ email: data.email, verified: false });
   return OTP.create(data);
 };
 
-export const getOTP = (email) => {
-  return OTP.findOne({
-    where: {
-      email,
-      verified: false,
-      expiresAt: { [Op.gt]: new Date() },
-    },
-
-    order: [["createdAt", "DESC"]],
-  });
-};
+export const getOTP = (email) =>
+  OTP.findOne({
+    email,
+    verified: false,
+    expiresAt: { $gt: new Date() },
+  }).sort({ createdAt: -1 });

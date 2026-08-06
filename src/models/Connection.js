@@ -1,34 +1,22 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const Connection = sequelize.define(
-  "Connection",
+const connectionSchema = new mongoose.Schema(
   {
-    id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-    requesterId: { type: DataTypes.INTEGER, allowNull: false },
-    recipientId: { type: DataTypes.INTEGER, allowNull: false },
-    status: {
-      type: DataTypes.STRING,
-      allowNull: false,
-      defaultValue: "pending",
-      validate: { isIn: [["pending", "accepted"]] },
-    },
+    id: { type: Number, unique: true, index: true },
+    requesterId: { type: Number, required: true },
+    recipientId: { type: Number, required: true },
+    status: { type: String, required: true, enum: ["pending", "accepted"], default: "pending" },
   },
-  {
-    tableName: "connections",
-    timestamps: true,
-    indexes: [
-      { unique: true, fields: ["requesterId", "recipientId"] },
-      { fields: ["recipientId", "status"] },
-    ],
-    validate: {
-      differentUsers() {
-        if (this.requesterId === this.recipientId) {
-          throw new Error("You cannot connect with yourself");
-        }
-      },
-    },
-  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
 );
 
-export default Connection;
+connectionSchema.index({ requesterId: 1, recipientId: 1 }, { unique: true });
+connectionSchema.index({ recipientId: 1, status: 1 });
+connectionSchema.pre("validate", function validateDifferentUsers(next) {
+  if (this.requesterId === this.recipientId) return next(new Error("You cannot connect with yourself"));
+  return next();
+});
+connectionSchema.plugin(autoIncrementPlugin, { modelName: "Connection" });
+
+export default mongoose.model("Connection", connectionSchema, "connections");

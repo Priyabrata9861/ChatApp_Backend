@@ -1,15 +1,17 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const GroupMessage = sequelize.define("GroupMessage", {
-  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  groupId: { type: DataTypes.INTEGER, allowNull: false },
-  senderId: { type: DataTypes.INTEGER, allowNull: false },
-  message: { type: DataTypes.TEXT, allowNull: false },
-}, {
-  tableName: "group_messages",
-  timestamps: true,
-  indexes: [{ fields: ["groupId", "createdAt"] }],
-});
+const groupMessageSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    groupId: { type: Number, required: true, index: true },
+    senderId: { type: Number, required: true },
+    message: { type: String, required: true },
+  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
+);
 
-export default GroupMessage;
+groupMessageSchema.index({ groupId: 1, createdAt: 1 });
+groupMessageSchema.plugin(autoIncrementPlugin, { modelName: "GroupMessage" });
+
+export default mongoose.model("GroupMessage", groupMessageSchema, "group_messages");

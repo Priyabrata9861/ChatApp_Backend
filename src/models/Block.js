@@ -1,14 +1,16 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const Block = sequelize.define("Block", {
-  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  blockerId: { type: DataTypes.INTEGER, allowNull: false },
-  blockedId: { type: DataTypes.INTEGER, allowNull: false },
-}, {
-  tableName: "blocks",
-  timestamps: true,
-  indexes: [{ unique: true, fields: ["blockerId", "blockedId"] }],
-});
+const blockSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    blockerId: { type: Number, required: true },
+    blockedId: { type: Number, required: true },
+  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
+);
 
-export default Block;
+blockSchema.index({ blockerId: 1, blockedId: 1 }, { unique: true });
+blockSchema.plugin(autoIncrementPlugin, { modelName: "Block" });
+
+export default mongoose.model("Block", blockSchema, "blocks");

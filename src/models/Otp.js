@@ -1,37 +1,18 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const OTP = sequelize.define("Otp",{
+const otpSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    email: { type: String, required: true, lowercase: true, trim: true, index: true },
+    otp: { type: String, required: true },
+    expiresAt: { type: Date },
+    verified: { type: Boolean, default: false },
+  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
+);
 
-    id:{
-    type:DataTypes.INTEGER,
-    primaryKey:true,
-    autoIncrement:true
-    },
-    
-    email:{
-    type:DataTypes.STRING,
-    allowNull:false
-    },
-    
-    otp:{
-    type:DataTypes.STRING,
-    allowNull:false
-    },
-    
-    expiresAt:{
-    type:DataTypes.DATE
-    },
-    
-    verified:{
-    type:DataTypes.BOOLEAN,
-    defaultValue:false
-    }
-    
-    
-    },{
-    tableName:"otp_verifications",
-    timestamps:true,
-    indexes: [{ fields: ["email", "verified", "createdAt"] }]
-    })
-    export default OTP;
+otpSchema.index({ email: 1, verified: 1, createdAt: -1 });
+otpSchema.plugin(autoIncrementPlugin, { modelName: "Otp" });
+
+export default mongoose.model("Otp", otpSchema, "otp_verifications");

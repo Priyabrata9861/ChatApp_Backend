@@ -1,50 +1,19 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const User = sequelize.define(
-  "User",
+const userSchema = new mongoose.Schema(
   {
-    id: {
-      type: DataTypes.INTEGER,
-      primaryKey: true,
-      autoIncrement: true,
-    },
-
-    email: {
-      type: DataTypes.STRING,
-      unique: true,
-      allowNull: false,
-      validate: {
-        isEmail: true,
-      },
-    },
-
-    name: {
-      type: DataTypes.STRING,
-    },
-
-    avatar: {
-      type: DataTypes.TEXT,
-    },
-
-    about: {
-      type: DataTypes.STRING,
-      defaultValue: "Hey there! I am using ChatApp",
-    },
-
-    isOnline: {
-      type: DataTypes.BOOLEAN,
-      defaultValue: false,
-    },
-
-    lastSeen: {
-      type: DataTypes.DATE,
-    },
+    id: { type: Number, unique: true, index: true },
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    name: { type: String, trim: true },
+    avatar: { type: String },
+    about: { type: String, default: "Hey there! I am using ChatApp" },
+    isOnline: { type: Boolean, default: false },
+    lastSeen: { type: Date },
   },
-  {
-    tableName: "users",
-    timestamps: true,
-  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
 );
 
-export default User;
+userSchema.plugin(autoIncrementPlugin, { modelName: "User" });
+
+export default mongoose.model("User", userSchema, "users");

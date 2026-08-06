@@ -1,6 +1,5 @@
 import { Server } from "socket.io";
 import jwt from "jsonwebtoken";
-import { Op } from "sequelize";
 import Connection from "../models/Connection.js";
 import Message from "../models/Message.js";
 import User from "../models/User.js";
@@ -11,7 +10,7 @@ import { areBlocked, areFriends } from "../services/social.service.js";
 const roomFor = (userId) => `user:${userId}`;
 const groupRoom = (groupId) => `group:${groupId}`;
 const connectionBetween = (firstUserId, secondUserId) => ({
-  [Op.or]: [
+  $or: [
     { requesterId: firstUserId, recipientId: secondUserId },
     { requesterId: secondUserId, recipientId: firstUserId },
   ],
@@ -37,9 +36,9 @@ export const initializeSocket = (server) => {
   io.on("connection", async (socket) => {
     const userId = Number(socket.userId);
     socket.join(roomFor(userId));
-    const groupMemberships = await GroupMember.findAll({ where: { userId } });
+    const groupMemberships = await GroupMember.find({ userId });
     groupMemberships.forEach((membership) => socket.join(groupRoom(membership.groupId)));
-    await User.update({ isOnline: true }, { where: { id: userId } });
+    await User.updateOne({ id: userId }, { isOnline: true });
     io.emit("presence:update", { userId, isOnline: true });
 
     socket.on("connection:send", async ({ recipientId }, reply = () => {}) => {
@@ -48,12 +47,10 @@ export const initializeSocket = (server) => {
         if (!Number.isInteger(targetId) || targetId === userId) {
           throw new Error("Invalid recipient");
         }
-        if (!(await User.findByPk(targetId))) throw new Error("User not found");
+        if (!(await User.findOne({ id: targetId }))) throw new Error("User not found");
         if (await areBlocked(userId, targetId)) throw new Error("This user is unavailable");
 
-        const existing = await Connection.findOne({
-          where: connectionBetween(userId, targetId),
-        });
+        const existing = await Connection.findOne(connectionBetween(userId, targetId));
         if (existing) throw new Error("A request already exists");
 
         const connection = await Connection.create({ requesterId: userId, recipientId: targetId });
@@ -67,7 +64,7 @@ export const initializeSocket = (server) => {
 
     socket.on("connection:respond", async ({ connectionId, action }, reply = () => {}) => {
       try {
-        const connection = await Connection.findByPk(Number(connectionId));
+        const connection = await Connection.findOne({ id: Number(connectionId) });
         if (!connection || connection.recipientId !== userId || connection.status !== "pending") {
           throw new Error("Request not found");
         }
@@ -96,7 +93,8 @@ export const initializeSocket = (server) => {
 
         if (await areBlocked(userId, targetId)) throw new Error("This user is unavailable");
         const connection = await Connection.findOne({
-          where: { ...connectionBetween(userId, targetId), status: "accepted" },
+          ...connectionBetween(userId, targetId),
+          status: "accepted",
         });
         if (!connection) throw new Error("Chat request must be accepted first");
 
@@ -115,7 +113,7 @@ export const initializeSocket = (server) => {
     });
 
     socket.on("group:join", async ({ groupId }) => {
-      const membership = await GroupMember.findOne({ where: { groupId: Number(groupId), userId } });
+      const membership = await GroupMember.findOne({ groupId: Number(groupId), userId });
       if (membership) socket.join(groupRoom(membership.groupId));
     });
 
@@ -124,7 +122,7 @@ export const initializeSocket = (server) => {
         const numericGroupId = Number(groupId);
         const text = String(message || "").trim();
         if (!text || text.length > 4000) throw new Error("Message must be between 1 and 4000 characters");
-        const membership = await GroupMember.findOne({ where: { groupId: numericGroupId, userId } });
+        const membership = await GroupMember.findOne({ groupId: numericGroupId, userId });
         if (!membership) throw new Error("You are not a member of this group");
         const saved = await GroupMessage.create({ groupId: numericGroupId, senderId: userId, message: text });
         const payload = saved.toJSON();
@@ -158,9 +156,9 @@ export const initializeSocket = (server) => {
     socket.on("message:read", async ({ senderId }) => {
       const otherUserId = Number(senderId);
       if (!Number.isInteger(otherUserId)) return;
-      await Message.update(
+      await Message.updateMany(
+        { senderId: otherUserId, receiverId: userId, readAt: null },
         { readAt: new Date() },
-        { where: { senderId: otherUserId, receiverId: userId, readAt: null } },
       );
     });
 
@@ -168,10 +166,11 @@ export const initializeSocket = (server) => {
       try {
         const targetId = Number(recipientId);
         const connection = await Connection.findOne({
-          where: { ...connectionBetween(userId, targetId), status: "accepted" },
+          ...connectionBetween(userId, targetId),
+          status: "accepted",
         });
         if (!connection) throw new Error("Conversation not found");
-        await Message.destroy({ where: { conversationId: connection.id } });
+        await Message.deleteMany({ conversationId: connection.id });
         const payload = { conversationId: connection.id, userIds: [userId, targetId] };
         io.to(roomFor(userId)).to(roomFor(targetId)).emit("messages:cleared", payload);
         reply({ ok: true });
@@ -182,7 +181,7 @@ export const initializeSocket = (server) => {
 
     socket.on("message:delete", async ({ messageId, mode }, reply = () => {}) => {
       try {
-        const message = await Message.findByPk(Number(messageId));
+        const message = await Message.findOne({ id: Number(messageId) });
         if (!message || ![message.senderId, message.receiverId].includes(userId)) {
           throw new Error("Message not found");
         }
@@ -207,7 +206,7 @@ export const initializeSocket = (server) => {
         const remainingSockets = io.sockets.adapter.rooms.get(roomFor(userId))?.size || 0;
         if (remainingSockets === 0) {
           const lastSeen = new Date();
-          await User.update({ isOnline: false, lastSeen }, { where: { id: userId } });
+          await User.updateOne({ id: userId }, { isOnline: false, lastSeen });
           io.emit("presence:update", { userId, isOnline: false, lastSeen });
         }
       } catch (error) {

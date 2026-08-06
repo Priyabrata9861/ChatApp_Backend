@@ -1,73 +1,24 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const Message = sequelize.define("Message",{
+const messageSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    conversationId: { type: Number, required: true, index: true },
+    senderId: { type: Number, required: true, index: true },
+    receiverId: { type: Number, index: true },
+    message: { type: String },
+    messageType: { type: String, default: "TEXT" },
+    readAt: { type: Date, default: null },
+    senderDeleted: { type: Boolean, required: true, default: false },
+    receiverDeleted: { type: Boolean, required: true, default: false },
+    deletedForEveryone: { type: Boolean, required: true, default: false },
+  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
+);
 
+messageSchema.index({ conversationId: 1, createdAt: 1 });
+messageSchema.index({ receiverId: 1, readAt: 1 });
+messageSchema.plugin(autoIncrementPlugin, { modelName: "Message" });
 
-    id:{
-    type:DataTypes.INTEGER,
-    primaryKey:true,
-    autoIncrement:true
-    },
-    
-    
-    conversationId:{
-    type:DataTypes.INTEGER,
-    allowNull:false
-    },
-    
-    
-    senderId:{
-    type:DataTypes.INTEGER,
-    allowNull:false
-    },
-
-    receiverId:{
-    type:DataTypes.INTEGER,
-    allowNull:true
-    },
-    
-    
-    message:{
-    type:DataTypes.TEXT
-    },
-    
-    
-    messageType:{
-    type:DataTypes.STRING,
-    defaultValue:"TEXT"
-    },
-
-    readAt:{
-    type:DataTypes.DATE,
-    allowNull:true
-    },
-
-    senderDeleted:{
-    type:DataTypes.BOOLEAN,
-    allowNull:false,
-    defaultValue:false
-    },
-
-    receiverDeleted:{
-    type:DataTypes.BOOLEAN,
-    allowNull:false,
-    defaultValue:false
-    },
-
-    deletedForEveryone:{
-    type:DataTypes.BOOLEAN,
-    allowNull:false,
-    defaultValue:false
-    }
-    
-    
-    },{
-    tableName:"messages",
-    timestamps:true,
-    indexes: [
-      { fields: ["conversationId", "createdAt"] },
-      { fields: ["receiverId", "readAt"] }
-    ]
-    })
-    export default Message;
+export default mongoose.model("Message", messageSchema, "messages");

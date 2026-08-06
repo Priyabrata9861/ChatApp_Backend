@@ -1,15 +1,17 @@
-import { DataTypes } from "sequelize";
-import sequelize from "../config/database.js";
+import mongoose from "mongoose";
+import { autoIncrementPlugin, toJSONOptions } from "./base.js";
 
-const GroupMember = sequelize.define("GroupMember", {
-  id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
-  groupId: { type: DataTypes.INTEGER, allowNull: false },
-  userId: { type: DataTypes.INTEGER, allowNull: false },
-  role: { type: DataTypes.STRING, allowNull: false, defaultValue: "member" },
-}, {
-  tableName: "group_members",
-  timestamps: true,
-  indexes: [{ unique: true, fields: ["groupId", "userId"] }],
-});
+const groupMemberSchema = new mongoose.Schema(
+  {
+    id: { type: Number, unique: true, index: true },
+    groupId: { type: Number, required: true },
+    userId: { type: Number, required: true },
+    role: { type: String, required: true, default: "member" },
+  },
+  { timestamps: true, toJSON: toJSONOptions, toObject: toJSONOptions },
+);
 
-export default GroupMember;
+groupMemberSchema.index({ groupId: 1, userId: 1 }, { unique: true });
+groupMemberSchema.plugin(autoIncrementPlugin, { modelName: "GroupMember" });
+
+export default mongoose.model("GroupMember", groupMemberSchema, "group_members");

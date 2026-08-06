@@ -1,11 +1,9 @@
-import { Op } from "sequelize";
 import Connection from "../models/Connection.js";
 import Message from "../models/Message.js";
-import sequelize from "../config/database.js";
 import { areBlocked } from "../services/social.service.js";
 
 const connectionBetween = (firstUserId, secondUserId) => ({
-  [Op.or]: [
+  $or: [
     { requesterId: firstUserId, recipientId: secondUserId },
     { requesterId: secondUserId, recipientId: firstUserId },
   ],
@@ -13,24 +11,19 @@ const connectionBetween = (firstUserId, secondUserId) => ({
 
 export const getConnections = async (req, res) => {
   try {
-    const connections = await Connection.findAll({
-      where: {
-        [Op.or]: [{ requesterId: req.user.id }, { recipientId: req.user.id }],
-      },
-      order: [["updatedAt", "DESC"]],
-    });
+    const connections = await Connection.find({
+      $or: [{ requesterId: req.user.id }, { recipientId: req.user.id }],
+    }).sort({ updatedAt: -1 });
+
     const items = await Promise.all(connections.map(async (connection) => {
       const lastMessage = connection.status === "accepted" ? await Message.findOne({
-        where: {
-          conversationId: connection.id,
-          deletedForEveryone: false,
-          [Op.or]: [
-            { senderId: req.user.id, senderDeleted: false },
-            { receiverId: req.user.id, receiverDeleted: false },
-          ],
-        },
-        order: [["createdAt", "DESC"]],
-      }) : null;
+        conversationId: connection.id,
+        deletedForEveryone: false,
+        $or: [
+          { senderId: req.user.id, senderDeleted: false },
+          { receiverId: req.user.id, receiverDeleted: false },
+        ],
+      }).sort({ createdAt: -1 }) : null;
       return { ...connection.toJSON(), lastMessage };
     }));
     return res.json({ success: true, connections: items });
@@ -50,24 +43,21 @@ export const getMessages = async (req, res) => {
       return res.status(403).json({ message: "This conversation is unavailable" });
     }
     const connection = await Connection.findOne({
-      where: { ...connectionBetween(req.user.id, otherUserId), status: "accepted" },
+      ...connectionBetween(req.user.id, otherUserId),
+      status: "accepted",
     });
     if (!connection) {
       return res.status(403).json({ message: "Chat request must be accepted first" });
     }
 
-    const messages = await Message.findAll({
-      where: {
-        conversationId: connection.id,
-        deletedForEveryone: false,
-        [Op.or]: [
-          { senderId: req.user.id, senderDeleted: false },
-          { receiverId: req.user.id, receiverDeleted: false },
-        ],
-      },
-      order: [["createdAt", "ASC"]],
-      limit: 200,
-    });
+    const messages = await Message.find({
+      conversationId: connection.id,
+      deletedForEveryone: false,
+      $or: [
+        { senderId: req.user.id, senderDeleted: false },
+        { receiverId: req.user.id, receiverDeleted: false },
+      ],
+    }).sort({ createdAt: 1 }).limit(200);
     return res.json({ success: true, messages });
   } catch {
     return res.status(500).json({ message: "Unable to load messages" });
@@ -76,15 +66,20 @@ export const getMessages = async (req, res) => {
 
 export const getUnreadCounts = async (req, res) => {
   try {
-    const counts = await Message.findAll({
-      where: { receiverId: req.user.id, readAt: null, receiverDeleted: false, deletedForEveryone: false },
-      attributes: ["senderId", [sequelize.fn("COUNT", sequelize.col("id")), "count"]],
-      group: ["senderId"],
-      raw: true,
-    });
+    const counts = await Message.aggregate([
+      {
+        $match: {
+          receiverId: req.user.id,
+          readAt: null,
+          receiverDeleted: false,
+          deletedForEveryone: false,
+        },
+      },
+      { $group: { _id: "$senderId", count: { $sum: 1 } } },
+    ]);
     return res.json({
       success: true,
-      unreadCounts: Object.fromEntries(counts.map((item) => [item.senderId, Number(item.count)])),
+      unreadCounts: Object.fromEntries(counts.map((item) => [item._id, item.count])),
     });
   } catch {
     return res.status(500).json({ message: "Unable to load unread messages" });
@@ -95,9 +90,9 @@ export const markMessagesRead = async (req, res) => {
   const senderId = Number(req.params.userId);
   if (!Number.isInteger(senderId)) return res.status(400).json({ message: "Invalid user" });
   try {
-    await Message.update(
+    await Message.updateMany(
+      { senderId, receiverId: req.user.id, readAt: null },
       { readAt: new Date() },
-      { where: { senderId, receiverId: req.user.id, readAt: null } },
     );
     return res.json({ success: true });
   } catch {
