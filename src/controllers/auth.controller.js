@@ -15,6 +15,7 @@ import {
 } from "../repository/user.repository.js";
 
 import { generateOTP, sendOTP } from "../services/otp.service.js";
+import { sendTestEmail as sendTestEmailMessage } from "../services/mail.service.js";
 
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
@@ -50,20 +51,36 @@ export const sendEmailOTP = async (req, res) => {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
-    const sendTask = sendOTP(email, otp);
-
-    if (process.env.NODE_ENV === "production") {
-      await sendTask;
-    } else {
-      sendTask.catch((error) => {
-        console.error("Failed to send OTP email:", error.message);
-      });
-    }
+    await sendOTP(email, otp);
 
     res.json({
       success: true,
 
       message: "OTP Sent",
+    });
+  } catch (error) {
+    res.status(500).json({
+      message: error.message,
+    });
+  }
+};
+
+export const sendTestEmail = async (req, res) => {
+  try {
+    const { error, value } = emailSchema.validate(req.body);
+
+    if (error)
+      return res.status(400).json({
+        message: error.message,
+      });
+
+    const { email } = value;
+    const info = await sendTestEmailMessage(email);
+
+    res.json({
+      success: true,
+      message: "Test email sent",
+      messageId: info.messageId,
     });
   } catch (error) {
     res.status(500).json({

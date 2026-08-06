@@ -3,6 +3,7 @@ import express from "express";
 import {
   sendEmailOTP,
   verifyOTP,
+  sendTestEmail,
   updateProfile,
   updateAvatar,
   getUsers,
@@ -16,6 +17,7 @@ const router = express.Router();
 router.post("/send-otp", sendEmailOTP);
 
 router.post("/verify-otp", verifyOTP);
+router.post("/test-email", sendTestEmail);
 
 router.put("/profile", protect, updateProfile);
 
