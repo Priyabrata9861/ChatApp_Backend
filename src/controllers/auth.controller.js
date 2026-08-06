@@ -50,12 +50,14 @@ export const sendEmailOTP = async (req, res) => {
       expiresAt: new Date(Date.now() + 5 * 60 * 1000),
     });
 
-    await sendOTP(email, otp);
-
     res.json({
       success: true,
 
       message: "OTP Sent",
+    });
+
+    sendOTP(email, otp).catch((error) => {
+      console.error("Failed to send OTP email:", error.message);
     });
   } catch (error) {
     res.status(500).json({
