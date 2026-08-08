@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { logger } from "../utils/logger.js";
 
 const trimEnv = (value) => value?.trim();
 
@@ -13,9 +14,16 @@ const getEmailAuth = () => {
 const getTransportOptions = () => {
   const auth = getEmailAuth();
 
-  if (!auth.user || !auth.pass) {
+  const missing = [];
+
+  if (!auth.user) missing.push("EMAIL");
+  if (!auth.pass) missing.push("APP_PASSWORD");
+
+  if (missing.length > 0) {
     throw new Error(
-      "Email service is not configured. Set EMAIL and APP_PASSWORD, or SMTP_HOST, SMTP_PORT, SMTP_SECURE, EMAIL, and APP_PASSWORD.",
+      `Email service is not configured. Missing environment variable(s): ${missing.join(", ")}. ` +
+        `Set EMAIL and APP_PASSWORD (a Gmail App Password, not your account password). ` +
+        `If using a non-Gmail SMTP provider, also set SMTP_HOST, SMTP_PORT, and SMTP_SECURE.`,
     );
   }
 
@@ -43,6 +51,34 @@ const getTransportOptions = () => {
 const createTransporter = () =>
   nodemailer.createTransport(getTransportOptions());
 
+// Wrap nodemailer sends so a failure surfaces as much detail as possible
+// (Gmail's `response`, SMTP `code`, `command`) — this is what makes the
+// otherwise-generic "Unable to send OTP email" diagnosable from server logs.
+const deliverMail = async (mailOptions) => {
+  const transporter = createTransporter();
+
+  try {
+    return await transporter.sendMail(mailOptions);
+  } catch (err) {
+    const detail = {
+      code: err?.code,
+      command: err?.command,
+      response: err?.response,
+      message: err?.message,
+    };
+
+    const gmailResponse = /response\d*\s*:\s*"([^"]+)/i.exec(err?.response || "");
+    if (gmailResponse) detail.gmailResponseDetail = gmailResponse[1];
+
+    logger.error("Nodemailer sendMail failed", err);
+
+    // Re-throw an error that includes the SMTP detail for the controller to log.
+    const wrapped = new Error(`SMTP send failed: ${err?.message}`);
+    Object.assign(wrapped, detail);
+    throw wrapped;
+  }
+};
+
 export const isEmailConfigured = () => {
   try {
     getTransportOptions();
@@ -53,9 +89,7 @@ export const isEmailConfigured = () => {
 };
 
 export const sendOTP = async (email, otp) => {
-  const transporter = createTransporter();
-
-  const info = await transporter.sendMail({
+  const info = await deliverMail({
     from: trimEnv(process.env.EMAIL),
     to: email,
     subject: "ChatApp OTP",
@@ -66,15 +100,13 @@ export const sendOTP = async (email, otp) => {
     `,
   });
 
-  console.info(`OTP email queued for ${email}: ${info.messageId}`);
+  logger.info(`OTP email queued for ${email}: ${info.messageId}`);
 
   return info;
 };
 
 export const sendTestEmail = async (email) => {
-  const transporter = createTransporter();
-
-  const info = await transporter.sendMail({
+  const info = await deliverMail({
     from: trimEnv(process.env.EMAIL),
     to: email,
     subject: "ChatApp Test Email",
@@ -85,6 +117,6 @@ export const sendTestEmail = async (email) => {
     `,
   });
 
-  console.info(`Test email queued for ${email}: ${info.messageId}`);
+  logger.info(`Test email queued for ${email}: ${info.messageId}`);
   return info;
 };

@@ -13,9 +13,11 @@ import {
   createUser,
   updateUserProfile,
 } from "../repository/user.repository.js";
+import OTP from "../models/Otp.js";
 
 import { generateOTP, sendOTP } from "../services/otp.service.js";
 import { sendTestEmail as sendTestEmailMessage } from "../services/mail.service.js";
+import { logger } from "../utils/logger.js";
 
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
@@ -40,30 +42,57 @@ export const sendEmailOTP = async (req, res) => {
       });
 
     const { email } = value;
-    const otp = generateOTP();
 
-    await saveOTP({
+    // Idempotency: if a recent, unexpired OTP already exists for this email,
+    // resend the SAME code instead of generating a new one. This keeps retries
+    // from the axios cold-start interceptor from sending duplicate OTP emails
+    // and confusing the user (only the most recent code will validate).
+    const existing = await OTP.findOne({
       email,
-      otp,
-      expiresAt: new Date(Date.now() + 5 * 60 * 1000),
-    });
+      verified: false,
+      expiresAt: { $gt: new Date(Date.now() - 60 * 1000) },
+    }).sort({ createdAt: -1 });
+
+    const otp = existing?.otp || generateOTP();
+
+    if (!existing) {
+      await saveOTP({
+        email,
+        otp,
+        expiresAt: new Date(Date.now() + 5 * 60 * 1000),
+      });
+    }
 
     try {
       const info = await sendOTP(email, otp);
-      console.info(`OTP email queued for ${email}: ${info.messageId}`);
+      logger.info(`OTP email queued for ${email}: ${info.messageId}`);
 
       return res.json({
         success: true,
         message: "OTP Sent",
       });
     } catch (error) {
-      console.error("Failed to send OTP email:", error.message);
+      // Keep the client-facing message generic for security, but log the FULL
+      // underlying cause (missing env vars, Gmail auth failure, SMTP detail)
+      // so it can be diagnosed from the deployment console.
+      logger.error(
+        `Failed to send OTP email to ${email}`,
+        {
+          name: error?.name,
+          code: error?.code,
+          command: error?.command,
+          response: error?.response,
+          message: error?.message,
+        },
+      );
+
       return res.status(500).json({
         success: false,
         message: "Unable to send OTP email. Please try again later.",
       });
     }
   } catch (error) {
+    logger.error(`Unexpected error in sendEmailOTP flow for ${req.body?.email}`, error);
     res.status(500).json({
       message: error.message,
     });
@@ -81,6 +110,7 @@ export const sendTestEmail = async (req, res) => {
 
     const { email } = value;
     const info = await sendTestEmailMessage(email);
+    logger.info(`Test email queued for ${email}: ${info.messageId}`);
 
     res.json({
       success: true,
@@ -88,6 +118,7 @@ export const sendTestEmail = async (req, res) => {
       messageId: info.messageId,
     });
   } catch (error) {
+    logger.error(`sendTestEmail failed`, error);
     res.status(500).json({
       message: error.message,
     });
