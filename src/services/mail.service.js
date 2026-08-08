@@ -1,7 +1,27 @@
 import nodemailer from "nodemailer";
+import { lookup as dnsLookup } from "node:dns/promises";
 import { logger } from "../utils/logger.js";
 
 const trimEnv = (value) => value?.trim();
+
+// Render's free tier has NO IPv6 egress. Gmail's SMTP host (smtp.gmail.com)
+// resolves to an IPv6 address that is returned FIRST by the default resolver,
+// causing `connect ENETUNREACH`. This lookup forces the connection to resolve
+// ONLY IPv4 (A) records, which reliably works on Render.
+const ipv4Lookup = async (hostname, options) => {
+  const { all } = options || {};
+  const records = await dnsLookup(hostname, { family: 4, all: true });
+
+  if (all) {
+    return { address: records, family: 4 };
+  }
+
+  // Prefer the first record; fall back to the whole list if empty.
+  const [first] = records;
+  return first
+    ? { address: first.address, family: first.family }
+    : { address: hostname, family: 4 };
+};
 
 const getEmailAuth = () => {
   const email = trimEnv(process.env.EMAIL);
@@ -28,11 +48,14 @@ const getTransportOptions = () => {
   }
 
   if (!process.env.SMTP_HOST) {
-    // `family: 4` forces IPv4. Render's free tier has no IPv6 egress, so
-    // Gmail's IPv6 SMTP address causes `ENETUNREACH`. This bypasses that.
+    // Use the explicit Gmail host + a forced IPv4 lookup. Do NOT rely on the
+    // `service: "gmail"` shortcut: it resolves smtp.gmail.com to an IPv6
+    // address first, which fails on Render (no IPv6 egress) with ENETUNREACH.
     return {
-      service: "gmail",
-      family: 4,
+      host: "smtp.gmail.com",
+      port: 465,
+      secure: true,
+      lookup: ipv4Lookup,
       auth,
     };
   }
@@ -47,7 +70,7 @@ const getTransportOptions = () => {
     host,
     port,
     secure,
-    family: 4,
+    lookup: ipv4Lookup,
     auth,
   };
 };
