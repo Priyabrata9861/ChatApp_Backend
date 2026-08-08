@@ -4,11 +4,12 @@ import { sendOTP as sendEmail } from "./mail.service.js";
 
 export const generateOTP = () => randomInt(100000, 1000000).toString();
 
-const emailRequiredVars = ["EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"];
+const emailRequiredVars = ["EMAIL", "BREVO_API_KEY"];
 
 export const sendOTP = async (email, otp) => {
-  // Use the real email service only when all SMTP vars are present. When they
-  // are absent (e.g. local dev without SMTP), fall back to logging the OTP.
+  // Use the real email service only when the sender EMAIL and Brevo API key are
+  // present. When they are absent (e.g. local dev without email), fall back to
+  // logging the OTP.
   if (emailRequiredVars.every((key) => Boolean(process.env[key]?.trim()))) {
     return sendEmail(email, otp);
   }
@@ -20,7 +21,7 @@ export const sendOTP = async (email, otp) => {
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       `Email service is not configured. Missing environment variable(s): ${missing.join(", ")}. ` +
-        `Set EMAIL plus SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in the deployment environment.`,
+        `Set the verified sender EMAIL and BREVO_API_KEY in the deployment environment.`,
     );
   }
 

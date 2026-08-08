@@ -1,117 +1,80 @@
-import nodemailer from "nodemailer";
 import { logger } from "../utils/logger.js";
 
 const trimEnv = (value) => value?.trim();
 
+// Brevo's transactional email HTTP API (HTTPS/443). This is far more reliable
+// than SMTP from Render's free tier, which BLOCKS outbound SMTP ports
+// (25/465/587) — the TCP connection simply never establishes (`ETIMEDOUT`,
+// `command: "CONN"`). HTTPS on port 443 is always allowed because the app
+// already serves its own traffic over it.
+const BREVO_API_URL = "https://api.brevo.com/v3/smtp/email";
+
 /**
- * Validate that all required SMTP configuration is present.
+ * Validate that all required email configuration is present.
  *
  * Throws a descriptive error listing the missing variable names. It NEVER
  * prints the actual values (credentials are never logged).
  */
 const assertConfigured = () => {
-  const required = ["EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"];
+  const required = ["EMAIL", "BREVO_API_KEY"];
   const missing = required.filter((key) => !trimEnv(process.env[key]));
 
   if (missing.length > 0) {
     throw new Error(
       `Email service is not configured. Missing environment variable(s): ${missing.join(", ")}. ` +
-        `Set these to your SMTP provider (e.g. Brevo) credentials in the deployment environment.`,
+        `Set the verified sender EMAIL and BREVO_API_KEY in the deployment environment.`,
     );
   }
+
+  // Log only booleans — never the actual key/email value.
+  logger.info(
+    "Email configuration loaded. " +
+      `EMAIL configured: ${Boolean(trimEnv(process.env.EMAIL))}. ` +
+      `BREVO_API_KEY configured: ${Boolean(trimEnv(process.env.BREVO_API_KEY))}.`,
+  );
 };
 
 /**
- * Build the generic Nodemailer transport options from environment variables.
+ * Send a transactional email through Brevo's HTTP API.
  *
- *   SMTP_HOST -> host
- *   SMTP_PORT -> port (default 587)
- *   SMTP_USER -> auth.user
- *   SMTP_PASS -> auth.pass
- *   EMAIL     -> sender "from" address (verified sender)
- *
- * `secure` is true only when the port is 465.
+ * Returns `{ messageId }` on success. Throws on failure, logging the HTTP
+ * status and Brevo's error response (which never contains the API key).
  */
-const getTransportOptions = () => {
+const sendViaBrevo = async ({ to, subject, text, html }) => {
   assertConfigured();
 
-  const port = Number(process.env.SMTP_PORT || 587);
-
-  return {
-    host: trimEnv(process.env.SMTP_HOST),
-    port,
-    secure: port === 465,
-    auth: {
-      user: trimEnv(process.env.SMTP_USER),
-      pass: trimEnv(process.env.SMTP_PASS),
+  const response = await fetch(BREVO_API_URL, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "api-key": trimEnv(process.env.BREVO_API_KEY),
+      accept: "application/json",
     },
-    // Render's free-tier network can be slow to reach external SMTP hosts.
-    // Use generous, explicit timeouts so the connection is not cut off
-    // prematurely (a short 15s timeout caused ETIMEDOUT "Connection timeout"
-    // on Render even though the SMTP host is reachable). The first send from a
-    // cold Render instance also needs extra time for the TCP handshake + TLS.
-    connectionTimeout: 90000, // ms to establish the TCP connection
-    greetingTimeout: 30000, // ms to receive the SMTP greeting
-    socketTimeout: 60000, // ms of inactivity on a socket before timeout
-    // Some SMTP providers (e.g. Brevo) prefer STARTTLS on 587. Nodemailer
-    // negotiates TLS automatically; this option is harmless and helps certain
-    // cloud networks.
-    tls: {
-      minVersion: "TLSv1.2",
-    },
-  };
-};
+    body: JSON.stringify({
+      sender: { email: trimEnv(process.env.EMAIL), name: "ChatApp" },
+      to: [{ email: to }],
+      subject,
+      htmlContent: html || text,
+      textContent: text,
+    }),
+  });
 
-/**
- * Create a reusable Nodemailer transporter. Creating it once (instead of on
- * every send) avoids re-validating config and re-establishing state per mail.
- */
-let transporter;
-
-const createTransporter = () => {
-  if (!transporter) {
-    transporter = nodemailer.createTransport(getTransportOptions());
-
-    // Log whether SMTP config is present WITHOUT exposing the actual values.
-    // This helps confirm the deployment env vars are wired up (booleans only).
-    logger.info(
-      "SMTP configuration loaded. " +
-        `SMTP_HOST configured: ${Boolean(trimEnv(process.env.SMTP_HOST))}. ` +
-        `SMTP_PORT configured: ${Boolean(trimEnv(process.env.SMTP_PORT))}. ` +
-        `SMTP_USER configured: ${Boolean(trimEnv(process.env.SMTP_USER))}. ` +
-        `SMTP_PASS configured: ${Boolean(trimEnv(process.env.SMTP_PASS))}. ` +
-        `EMAIL configured: ${Boolean(trimEnv(process.env.EMAIL))}.`,
+  if (!response.ok) {
+    const body = await response.text();
+    const err = new Error(
+      `Brevo API error (${response.status}): ${body}`,
     );
+    // Log without ever printing the API key.
+    logger.error("Brevo sendMail failed", {
+      status: response.status,
+      response: body,
+      message: err.message,
+    });
+    throw err;
   }
-  return transporter;
-};
 
-/**
- * Send a mail through the transporter, surfacing useful SMTP diagnostics
- * (code, command, response, message) in the server logs — while never
- * logging the SMTP password/key.
- */
-const deliverMail = async (mailOptions) => {
-  const emailTransporter = createTransporter();
-
-  try {
-    return await emailTransporter.sendMail(mailOptions);
-  } catch (err) {
-    const detail = {
-      code: err?.code,
-      command: err?.command,
-      response: err?.response,
-      message: err?.message,
-    };
-
-    logger.error("Nodemailer sendMail failed", err);
-
-    // Re-throw an error that includes SMTP detail for the controller to log
-    // (the controller returns a generic client message and never surfaces this).
-    const wrapped = new Error(`SMTP send failed: ${err?.message}`);
-    Object.assign(wrapped, detail);
-    throw wrapped;
-  }
+  const data = await response.json();
+  return { messageId: data.messageId };
 };
 
 export const isEmailConfigured = () => {
@@ -124,8 +87,7 @@ export const isEmailConfigured = () => {
 };
 
 export const sendOTP = async (email, otp) => {
-  const info = await deliverMail({
-    from: trimEnv(process.env.EMAIL),
+  const info = await sendViaBrevo({
     to: email,
     subject: "ChatApp OTP",
     text: `Your OTP is ${otp}. It expires in 5 minutes.`,
@@ -141,18 +103,16 @@ export const sendOTP = async (email, otp) => {
 };
 
 export const sendTestEmail = async (email) => {
-  const info = await deliverMail({
-    from: trimEnv(process.env.EMAIL),
+  const info = await sendViaBrevo({
     to: email,
     subject: "ChatApp Test Email",
-    text: "This is a test email from ChatApp. If you receive this, SMTP is configured correctly.",
+    text: "This is a test email from ChatApp. If you receive this, email delivery is configured correctly.",
     html: `
       <h2>ChatApp Test Email</h2>
-      <p>If you receive this message, SMTP is configured correctly.</p>
+      <p>If you receive this message, email delivery is configured correctly.</p>
     `,
   });
 
   logger.info(`Test email sent to ${email}: ${info.messageId}`);
   return info;
 };
-
