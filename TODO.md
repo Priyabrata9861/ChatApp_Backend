@@ -12,11 +12,11 @@ replacing Gmail SMTP with Brevo SMTP (generic Nodemailer SMTP transport).
       add config validation, and improve error logging (never log secrets).
 - [x] Update `src/server.js` to `import "dotenv/config";` at top, listen on
       `0.0.0.0`, and use `process.env.PORT || 5000`.
-- [x] Update `src/services/otp.service.js` gate to use SMTP vars instead of
+- [x] Confirm `src/services/otp.service.js` uses SMTP vars instead of
       `APP_PASSWORD`.
 - [x] Confirm CORS config already allows Vercel origins (no change).
 - [x] Confirm frontend Axios already uses VITE_API_URL + idempotent retry (no
       code change).
-- [x] Syntax check all changed backend files (passed).
-- [ ] Deploy: add Render env vars, redeploy, test /test-email and /send-otp.
-- [ ] Security: rotate any previously exposed credentials.
+- [x] Syntax-check all modified backend files.
+- [x] Provide Render env vars, Brevo setup, deployment/testing steps, and
+      security rotation instructions.
