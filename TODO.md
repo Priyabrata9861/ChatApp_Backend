@@ -1,22 +1,22 @@
-# TODO: Fix OTP Email 500 Error on Render (IPv6 ENETUNREACH)
+# TODO: Replace Gmail SMTP with Brevo SMTP for Reliable Production OTP Email
 
-## Root cause
-`connect ENETUNREACH <IPv6>` — Gmail's SMTP resolves to an IPv6 address first.
-Render's free tier has NO IPv6 egress, so the connection fails → 500.
+## Goal
+Make OTP email delivery work reliably from the Render production backend by
+replacing Gmail SMTP with Brevo SMTP (generic Nodemailer SMTP transport).
 
-Even after adding `--dns-result-order=ipv4first` and `family: 4`, the error
-persisted because nodemailer's `service: "gmail"` shortcut still resolved to
-IPv6.
-
-## Definitive fix
-- [x] Custom `ipv4Lookup` using `dns.lookup(hostname, { family: 4, all: true })`
-  in `src/services/mail.service.js`.
-- [x] Use explicit `host: "smtp.gmail.com"`, `port: 465`, `secure: true` instead
-  of `service: "gmail"` shortcut.
-- [x] Attach `lookup: ipv4Lookup` to both Gmail and custom-SMTP transport options.
-- [x] Verified `smtp.gmail.com` resolves to IPv4 `192.178.211.108` locally.
-- [x] Syntax check passed.
-
-## Remaining
-- Commit + push so Render redeploys.
-- Retest `/api/auth/test-email` and `/api/auth/send-otp`.
+## Steps
+- [x] Analyze existing mail.service.js, server.js, otp.service.js, cors.js,
+      auth.controller.js, axios.js, package.json
+- [x] Rewrite `src/services/mail.service.js` to a generic Nodemailer SMTP
+      transport reading SMTP_HOST/SMTP_PORT/SMTP_USER/SMTP_PASS, sender EMAIL,
+      add config validation, and improve error logging (never log secrets).
+- [x] Update `src/server.js` to `import "dotenv/config";` at top, listen on
+      `0.0.0.0`, and use `process.env.PORT || 5000`.
+- [x] Update `src/services/otp.service.js` gate to use SMTP vars instead of
+      `APP_PASSWORD`.
+- [x] Confirm CORS config already allows Vercel origins (no change).
+- [x] Confirm frontend Axios already uses VITE_API_URL + idempotent retry (no
+      code change).
+- [x] Syntax check all changed backend files (passed).
+- [ ] Deploy: add Render env vars, redeploy, test /test-email and /send-otp.
+- [ ] Security: rotate any previously exposed credentials.

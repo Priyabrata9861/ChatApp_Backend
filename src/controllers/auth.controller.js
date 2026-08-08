@@ -73,7 +73,7 @@ export const sendEmailOTP = async (req, res) => {
       });
     } catch (error) {
       // Keep the client-facing message generic for security, but log the FULL
-      // underlying cause (missing env vars, Gmail auth failure, SMTP detail)
+      // underlying cause (missing env vars, SMTP auth failure, SMTP detail)
       // so it can be diagnosed from the deployment console.
       logger.error(
         `Failed to send OTP email to ${email}`,

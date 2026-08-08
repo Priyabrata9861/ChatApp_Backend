@@ -1,104 +1,87 @@
 import nodemailer from "nodemailer";
-import { lookup as dnsLookup } from "node:dns/promises";
 import { logger } from "../utils/logger.js";
 
 const trimEnv = (value) => value?.trim();
 
-// Render's free tier has NO IPv6 egress. Gmail's SMTP host (smtp.gmail.com)
-// resolves to an IPv6 address that is returned FIRST by the default resolver,
-// causing `connect ENETUNREACH`. This lookup forces the connection to resolve
-// ONLY IPv4 (A) records, which reliably works on Render.
-const ipv4Lookup = async (hostname, options) => {
-  const { all } = options || {};
-  const records = await dnsLookup(hostname, { family: 4, all: true });
-
-  if (all) {
-    return { address: records, family: 4 };
-  }
-
-  // Prefer the first record; fall back to the whole list if empty.
-  const [first] = records;
-  return first
-    ? { address: first.address, family: first.family }
-    : { address: hostname, family: 4 };
-};
-
-const getEmailAuth = () => {
-  const email = trimEnv(process.env.EMAIL);
-  const rawPassword = process.env.APP_PASSWORD || "";
-  const pass = rawPassword.replace(/\s+/g, "").trim();
-
-  return { user: email, pass };
-};
-
-const getTransportOptions = () => {
-  const auth = getEmailAuth();
-
-  const missing = [];
-
-  if (!auth.user) missing.push("EMAIL");
-  if (!auth.pass) missing.push("APP_PASSWORD");
+/**
+ * Validate that all required SMTP configuration is present.
+ *
+ * Throws a descriptive error listing the missing variable names. It NEVER
+ * prints the actual values (credentials are never logged).
+ */
+const assertConfigured = () => {
+  const required = ["EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"];
+  const missing = required.filter((key) => !trimEnv(process.env[key]));
 
   if (missing.length > 0) {
     throw new Error(
       `Email service is not configured. Missing environment variable(s): ${missing.join(", ")}. ` +
-        `Set EMAIL and APP_PASSWORD (a Gmail App Password, not your account password). ` +
-        `If using a non-Gmail SMTP provider, also set SMTP_HOST, SMTP_PORT, and SMTP_SECURE.`,
+        `Set these to your SMTP provider (e.g. Brevo) credentials in the deployment environment.`,
     );
   }
+};
 
-  if (!process.env.SMTP_HOST) {
-    // Use the explicit Gmail host + a forced IPv4 lookup. Do NOT rely on the
-    // `service: "gmail"` shortcut: it resolves smtp.gmail.com to an IPv6
-    // address first, which fails on Render (no IPv6 egress) with ENETUNREACH.
-    //
-    // NOTE: Gmail often blocks SMTP connections from cloud hosting providers
-    // (like Render) with a connection timeout. If you hit this, set SMTP_HOST,
-    // SMTP_PORT, SMTP_USER, and SMTP_PASS to a free transactional email
-    // service (e.g. Brevo/Sendinblue, 300 emails/day free) which allows cloud
-    // host connections.
-    return {
-      host: "smtp.gmail.com",
-      port: 465,
-      secure: true,
-      lookup: ipv4Lookup,
-      auth,
-    };
-  }
+/**
+ * Build the generic Nodemailer transport options from environment variables.
+ *
+ *   SMTP_HOST -> host
+ *   SMTP_PORT -> port (default 587)
+ *   SMTP_USER -> auth.user
+ *   SMTP_PASS -> auth.pass
+ *   EMAIL     -> sender "from" address (verified sender)
+ *
+ * `secure` is true only when the port is 465.
+ */
+const getTransportOptions = () => {
+  assertConfigured();
 
-  const host = trimEnv(process.env.SMTP_HOST);
   const port = Number(process.env.SMTP_PORT || 587);
-  const secure = process.env.SMTP_SECURE
-    ? process.env.SMTP_SECURE.toLowerCase() === "true"
-    : port === 465;
-
-  // Allow separate SMTP_USER/SMTP_PASS (common for providers like Brevo where
-  // the SMTP login differs from the sender email). Falls back to EMAIL/APP_PASSWORD.
-  const smtpAuth = {
-    user: trimEnv(process.env.SMTP_USER) || auth.user,
-    pass: trimEnv(process.env.SMTP_PASS) || auth.pass,
-  };
 
   return {
-    host,
+    host: trimEnv(process.env.SMTP_HOST),
     port,
-    secure,
-    lookup: ipv4Lookup,
-    auth: smtpAuth,
+    secure: port === 465,
+    auth: {
+      user: trimEnv(process.env.SMTP_USER),
+      pass: trimEnv(process.env.SMTP_PASS),
+    },
   };
 };
 
-const createTransporter = () =>
-  nodemailer.createTransport(getTransportOptions());
+/**
+ * Create a reusable Nodemailer transporter. Creating it once (instead of on
+ * every send) avoids re-validating config and re-establishing state per mail.
+ */
+let transporter;
 
-// Wrap nodemailer sends so a failure surfaces as much detail as possible
-// (Gmail's `response`, SMTP `code`, `command`) — this is what makes the
-// otherwise-generic "Unable to send OTP email" diagnosable from server logs.
+const createTransporter = () => {
+  if (!transporter) {
+    transporter = nodemailer.createTransport(getTransportOptions());
+
+    // Log whether SMTP config is present WITHOUT exposing the actual values.
+    // This helps confirm the deployment env vars are wired up (booleans only).
+    logger.info(
+      "SMTP configuration loaded. " +
+        `SMTP_HOST configured: ${Boolean(trimEnv(process.env.SMTP_HOST))}. ` +
+        `SMTP_PORT configured: ${Boolean(trimEnv(process.env.SMTP_PORT))}. ` +
+        `SMTP_USER configured: ${Boolean(trimEnv(process.env.SMTP_USER))}. ` +
+        `SMTP_PASS configured: ${Boolean(trimEnv(process.env.SMTP_PASS))}. ` +
+        `EMAIL configured: ${Boolean(trimEnv(process.env.EMAIL))}.`,
+    );
+  }
+  return transporter;
+};
+
+/**
+ * Send a mail through the transporter, surfacing useful SMTP diagnostics
+ * (code, command, response, message) in the server logs — while never
+ * logging the SMTP password/key.
+ */
 const deliverMail = async (mailOptions) => {
-  const transporter = createTransporter();
+  const emailTransporter = createTransporter();
 
   try {
-    return await transporter.sendMail(mailOptions);
+    return await emailTransporter.sendMail(mailOptions);
   } catch (err) {
     const detail = {
       code: err?.code,
@@ -107,12 +90,10 @@ const deliverMail = async (mailOptions) => {
       message: err?.message,
     };
 
-    const gmailResponse = /response\d*\s*:\s*"([^"]+)/i.exec(err?.response || "");
-    if (gmailResponse) detail.gmailResponseDetail = gmailResponse[1];
-
     logger.error("Nodemailer sendMail failed", err);
 
-    // Re-throw an error that includes the SMTP detail for the controller to log.
+    // Re-throw an error that includes SMTP detail for the controller to log
+    // (the controller returns a generic client message and never surfaces this).
     const wrapped = new Error(`SMTP send failed: ${err?.message}`);
     Object.assign(wrapped, detail);
     throw wrapped;
@@ -121,7 +102,7 @@ const deliverMail = async (mailOptions) => {
 
 export const isEmailConfigured = () => {
   try {
-    getTransportOptions();
+    assertConfigured();
     return true;
   } catch {
     return false;
@@ -140,7 +121,7 @@ export const sendOTP = async (email, otp) => {
     `,
   });
 
-  logger.info(`OTP email queued for ${email}: ${info.messageId}`);
+  logger.info(`OTP email sent to ${email}: ${info.messageId}`);
 
   return info;
 };
@@ -157,6 +138,7 @@ export const sendTestEmail = async (email) => {
     `,
   });
 
-  logger.info(`Test email queued for ${email}: ${info.messageId}`);
+  logger.info(`Test email sent to ${email}: ${info.messageId}`);
   return info;
 };
+

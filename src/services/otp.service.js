@@ -4,19 +4,23 @@ import { sendOTP as sendEmail } from "./mail.service.js";
 
 export const generateOTP = () => randomInt(100000, 1000000).toString();
 
+const emailRequiredVars = ["EMAIL", "SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS"];
+
 export const sendOTP = async (email, otp) => {
-  if (process.env.EMAIL && process.env.APP_PASSWORD) {
+  // Use the real email service only when all SMTP vars are present. When they
+  // are absent (e.g. local dev without SMTP), fall back to logging the OTP.
+  if (emailRequiredVars.every((key) => Boolean(process.env[key]?.trim()))) {
     return sendEmail(email, otp);
   }
 
-  const missing = [];
-  if (!process.env.EMAIL) missing.push("EMAIL");
-  if (!process.env.APP_PASSWORD) missing.push("APP_PASSWORD");
+  const missing = emailRequiredVars.filter(
+    (key) => !Boolean(process.env[key]?.trim()),
+  );
 
   if (process.env.NODE_ENV === "production") {
     throw new Error(
       `Email service is not configured. Missing environment variable(s): ${missing.join(", ")}. ` +
-        `Set EMAIL and APP_PASSWORD (a Gmail App Password) in the deployment environment.`,
+        `Set EMAIL plus SMTP_HOST, SMTP_PORT, SMTP_USER, SMTP_PASS in the deployment environment.`,
     );
   }
 
