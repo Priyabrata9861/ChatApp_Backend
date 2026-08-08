@@ -28,8 +28,11 @@ const getTransportOptions = () => {
   }
 
   if (!process.env.SMTP_HOST) {
+    // `family: 4` forces IPv4. Render's free tier has no IPv6 egress, so
+    // Gmail's IPv6 SMTP address causes `ENETUNREACH`. This bypasses that.
     return {
       service: "gmail",
+      family: 4,
       auth,
     };
   }
@@ -44,6 +47,7 @@ const getTransportOptions = () => {
     host,
     port,
     secure,
+    family: 4,
     auth,
   };
 };
