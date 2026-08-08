@@ -51,6 +51,12 @@ const getTransportOptions = () => {
     // Use the explicit Gmail host + a forced IPv4 lookup. Do NOT rely on the
     // `service: "gmail"` shortcut: it resolves smtp.gmail.com to an IPv6
     // address first, which fails on Render (no IPv6 egress) with ENETUNREACH.
+    //
+    // NOTE: Gmail often blocks SMTP connections from cloud hosting providers
+    // (like Render) with a connection timeout. If you hit this, set SMTP_HOST,
+    // SMTP_PORT, SMTP_USER, and SMTP_PASS to a free transactional email
+    // service (e.g. Brevo/Sendinblue, 300 emails/day free) which allows cloud
+    // host connections.
     return {
       host: "smtp.gmail.com",
       port: 465,
@@ -66,12 +72,19 @@ const getTransportOptions = () => {
     ? process.env.SMTP_SECURE.toLowerCase() === "true"
     : port === 465;
 
+  // Allow separate SMTP_USER/SMTP_PASS (common for providers like Brevo where
+  // the SMTP login differs from the sender email). Falls back to EMAIL/APP_PASSWORD.
+  const smtpAuth = {
+    user: trimEnv(process.env.SMTP_USER) || auth.user,
+    pass: trimEnv(process.env.SMTP_PASS) || auth.pass,
+  };
+
   return {
     host,
     port,
     secure,
     lookup: ipv4Lookup,
-    auth,
+    auth: smtpAuth,
   };
 };
 
