@@ -45,6 +45,19 @@ const getTransportOptions = () => {
       user: trimEnv(process.env.SMTP_USER),
       pass: trimEnv(process.env.SMTP_PASS),
     },
+    // Without explicit timeouts, the default is 2 minutes per socket phase.
+    // Some cloud providers (and Brevo) can take a while to establish/upgrade
+    // the connection, so give generous, explicit limits to avoid premature
+    // "Connection timeout" failures on Render.
+    connectionTimeout: 15000, // ms to establish the TCP connection
+    greetingTimeout: 15000, // ms to receive the SMTP greeting
+    socketTimeout: 30000, // ms of inactivity on a socket before timeout
+    // Some SMTP providers (e.g. Brevo) prefer STARTTLS on 587. Nodemailer
+    // negotiates TLS automatically; this option is harmless and helps certain
+    // cloud networks.
+    tls: {
+      minVersion: "TLSv1.2",
+    },
   };
 };
 
